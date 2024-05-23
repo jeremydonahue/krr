@@ -59,21 +59,18 @@ class ClusterLoader(Configurable):
             self.__hpa_list = await self.__list_hpa()
             objects_tuple = await asyncio.gather(
                 self._list_deployments(),
-                self._list_all_statefulsets(),
-                self._list_all_daemon_set(),
-                self._list_all_jobs(),
+                self._list_statefulsets(),
+                self._list_daemon_set(),
+                self._list_jobs(),
             )
+
         except Exception as e:
             self.error(f"Error trying to list pods in cluster {self.cluster}: {e}")
             self.debug_exception()
             return []
 
         objects = itertools.chain(*objects_tuple)
-        if self.config.namespaces == "*":
-            # NOTE: We are not scanning kube-system namespace by default
-            result = [obj for obj in objects if obj.namespace != "kube-system"]
-        else:
-            result = [obj for obj in objects if obj.namespace in self.config.namespaces]
+        result = [obj for obj in objects if obj.namespace != "kube-system"]
 
         namespaces = {obj.namespace for obj in result}
         self.info(f"Found {len(result)} objects across {len(namespaces)} namespaces in {self.cluster}")
@@ -130,64 +127,125 @@ class ClusterLoader(Configurable):
         )
 
     async def _list_deployments(self) -> list[K8sObjectData]:
-        self.debug(f"Listing deployments in {self.cluster}")
+        self.debug(f"Listing deployments in {self.cluster}/{self.config.namespaces}")
         loop = asyncio.get_running_loop()
-        ret: V1DeploymentList = await loop.run_in_executor(
-            self.executor, lambda: self.apps.list_deployment_for_all_namespaces(watch=False)
-        )
-        self.debug(f"Found {len(ret.items)} deployments in {self.cluster}")
+        rets: list[V1DeploymentList]
+        if self.config.namespaces == "*":
+            rets = [await loop.run_in_executor(
+                self.executor, lambda: self.apps.list_deployment_for_all_namespaces(watch=False)
+            )]
+            self.debug(f"Found {len(rets[0].items)} deployments in {self.cluster}/*")
+        else:
+            coros = [loop.run_in_executor(self.executor, lambda: self.apps.list_namespaced_deployment(ns, watch=False)) for ns in self.config.namespaces]
+            rets = await asyncio.gather(*coros)
+            for ns in self.config.namespaces:
+                count = 0
+                for ret in rets:
+                    for item in ret.items:
+                        if item.metadata.namespace == ns:
+                            count += 1
+                self.debug(f"Found {count} deployments in {self.cluster}/{ns}")
+            # for ret in rets:
+            #     self.debug(f"Found {len(ret.items)} deployments in {self.cluster}/{ret.items[0].metadata.namespace}")
 
         return await asyncio.gather(
             *[
                 self.__build_obj(item, container)
+                for ret in rets
                 for item in ret.items
                 for container in item.spec.template.spec.containers
             ]
         )
 
-    async def _list_all_statefulsets(self) -> list[K8sObjectData]:
-        self.debug(f"Listing statefulsets in {self.cluster}")
+    async def _list_statefulsets(self) -> list[K8sObjectData]:
+        self.debug(f"Listing statefulsets in {self.cluster}/{self.config.namespaces}")
         loop = asyncio.get_running_loop()
-        ret: V1StatefulSetList = await loop.run_in_executor(
-            self.executor, lambda: self.apps.list_stateful_set_for_all_namespaces(watch=False)
-        )
-        self.debug(f"Found {len(ret.items)} statefulsets in {self.cluster}")
+        rets: list[V1StatefulSetList]
+        if self.config.namespaces == "*":
+            rets = [await loop.run_in_executor(
+                self.executor, lambda: self.apps.list_stateful_set_for_all_namespaces(watch=False)
+            )]
+            self.debug(f"Found {len(rets[0].items)} statefulsets in {self.cluster}/*")
+        else:
+            coros = [loop.run_in_executor(self.executor, lambda: self.apps.list_namespaced_stateful_set(ns, watch=False)) for ns in self.config.namespaces]
+            rets = await asyncio.gather(*coros)
+            for ns in self.config.namespaces:
+                count = 0
+                for ret in rets:
+                    for item in ret.items:
+                        if item.metadata.namespace == ns:
+                            count += 1
+                self.debug(f"Found {count} statefulsets in {self.cluster}/{ns}")
+            # for ret in rets:
+            #     self.debug(f"Found {len(ret.items)} statefulsets in {self.cluster}/{ret.items[0].metadata.namespace}")
 
         return await asyncio.gather(
             *[
                 self.__build_obj(item, container)
+                for ret in rets
                 for item in ret.items
                 for container in item.spec.template.spec.containers
             ]
         )
 
-    async def _list_all_daemon_set(self) -> list[K8sObjectData]:
-        self.debug(f"Listing daemonsets in {self.cluster}")
+    async def _list_daemon_set(self) -> list[K8sObjectData]:
+        self.debug(f"Listing daemonsets in {self.cluster}/{self.config.namespaces}")
         loop = asyncio.get_running_loop()
-        ret: V1DaemonSetList = await loop.run_in_executor(
-            self.executor, lambda: self.apps.list_daemon_set_for_all_namespaces(watch=False)
-        )
-        self.debug(f"Found {len(ret.items)} daemonsets in {self.cluster}")
+        rets: list[V1DaemonSetList]
+        if self.config.namespaces == "*":
+            rets = [await loop.run_in_executor(
+                self.executor, lambda: self.apps.list_daemon_set_for_all_namespaces(watch=False)
+            )]
+            self.debug(f"Found {len(rets[0].items)} daemonsets in {self.cluster}/*")
+        else:
+            coros = [loop.run_in_executor(self.executor, lambda: self.apps.list_namespaced_daemon_set(ns, watch=False)) for ns in self.config.namespaces]
+            rets = await asyncio.gather(*coros)
+            for ns in self.config.namespaces:
+                count = 0
+                for ret in rets:
+                    for item in ret.items:
+                        if item.metadata.namespace == ns:
+                            count += 1
+                self.debug(f"Found {count} daemonsets in {self.cluster}/{ns}")
+            # for ret in rets:
+            #     self.debug(f"Found {len(ret.items)} daemonsets in {self.cluster}/{ret.items[0].metadata.namespace}")
 
         return await asyncio.gather(
             *[
                 self.__build_obj(item, container)
+                for ret in rets
                 for item in ret.items
                 for container in item.spec.template.spec.containers
             ]
         )
 
-    async def _list_all_jobs(self) -> list[K8sObjectData]:
-        self.debug(f"Listing jobs in {self.cluster}")
+    async def _list_jobs(self) -> list[K8sObjectData]:
+        self.debug(f"Listing jobs in {self.cluster}/{self.config.namespaces}")
         loop = asyncio.get_running_loop()
-        ret: V1JobList = await loop.run_in_executor(
-            self.executor, lambda: self.batch.list_job_for_all_namespaces(watch=False)
-        )
-        self.debug(f"Found {len(ret.items)} jobs in {self.cluster}")
+        rets: list[V1JobList]
+        if self.config.namespaces == "*":
+            rets = [await loop.run_in_executor(
+                self.executor, lambda: self.batch.list_job_for_all_namespaces(watch=False)
+            )]
+            self.debug(f"Found {len(rets[0].items)} jobs in {self.cluster}/*")
+        else:
+            coros = [loop.run_in_executor(self.executor, lambda: self.batch.list_namespaced_job(ns, watch=False)) for ns in self.config.namespaces]
+            rets = await asyncio.gather(*coros)
+            for ns in self.config.namespaces:
+                count = 0
+                for ret in rets:
+                    for item in ret.items:
+                        if item.metadata.namespace == ns:
+                            count += 1
+                self.debug(f"Found {count} jobs in {self.cluster}/{ns}")
+
+            # for ret in rets:
+            #     self.debug(f"Found {len(ret.items)} jobs in {self.cluster}/{ret.items[0].metadata.namespace}")
 
         return await asyncio.gather(
             *[
                 self.__build_obj(item, container)
+                for ret in rets
                 for item in ret.items
                 for container in item.spec.template.spec.containers
             ]
@@ -198,26 +256,38 @@ class ClusterLoader(Configurable):
 
         self.debug(f"Listing pods in {self.cluster}")
         loop = asyncio.get_running_loop()
-        ret: V1PodList = await loop.run_in_executor(
-            self.executor, lambda: self.apps.list_pod_for_all_namespaces(watch=False)
-        )
-        self.debug(f"Found {len(ret.items)} pods in {self.cluster}")
+        rets: list[V1PodList]
+        if self.config.namespaces == "*":
+            rets = [await loop.run_in_executor(
+                self.executor, lambda: self.core.list_pod_for_all_namespaces(watch=False)
+            )]
+            self.debug(f"Found {len(ret.items)} pods in {self.cluster}/*")
+        else:
+            coros = [loop.run_in_executor(self.executor, lambda: self.core.list_namespaced_pod(ns, watch=False)) for ns in self.config.namespaces]
+            rets = await asyncio.gather(*coros)
+            for ret in rets:
+                self.debug(f"Found {len(ret.items)} pods in {self.cluster}/{ret.items[0].metadata.namespace}")
 
         return await asyncio.gather(
-            *[self.__build_obj(item, container) for item in ret.items for container in item.spec.containers]
+            *[self.__build_obj(item, container) for ret in rets for item in ret.items for container in item.spec.containers]
         )
 
     async def __list_hpa(self) -> dict[tuple[str, str], HPAData]:
-        """List all HPA objects in the cluster.
+        """List all HPA objects in the cluster or by namespace.
 
         Returns:
             dict[tuple[str, str], HPAData]: A dictionary of HPA objects, indexed by scaleTargetRef (kind, name).
         """
 
         loop = asyncio.get_running_loop()
-        res: V2HorizontalPodAutoscalerList = await loop.run_in_executor(
-            self.executor, lambda: self.autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces(watch=False)
-        )
+        rets: list[V2HorizontalPodAutoscalerList]
+        if self.config.namespaces == "*":
+            rets = [await loop.run_in_executor(
+                self.executor, lambda: self.autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces(watch=False)
+            )]
+        else:
+            coros = [loop.run_in_executor(self.executor, lambda: self.autoscaling.list_namespaced_horizontal_pod_autoscaler(ns, watch=False)) for ns in self.config.namespaces]
+            rets = await asyncio.gather(*coros)
 
         def __get_metric(hpa: V2HorizontalPodAutoscaler, metric_name: str) -> Optional[float]:
             return next(
@@ -238,6 +308,7 @@ class ClusterLoader(Configurable):
                 target_cpu_utilization_percentage=__get_metric(hpa, "cpu"),
                 target_memory_utilization_percentage=__get_metric(hpa, "memory"),
             )
+            for res in rets
             for hpa in res.items
         }
 
